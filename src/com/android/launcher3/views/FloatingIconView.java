@@ -495,6 +495,11 @@ public class FloatingIconView extends FrameLayout implements
         }
     }
 
+
+    /** Keep the complete icon renderer alive during a parallel home/app launch. */
+    public void setFinishOnTouchDown(boolean finishOnTouchDown) {
+        mListenerView.setCloseOnTouchDown(finishOnTouchDown);
+    }
     /**
      * Sets a runnable that is called after a call to {@link #fastFinish()}.
      */
@@ -586,7 +591,9 @@ public class FloatingIconView extends FrameLayout implements
             } else {
                 btvIcon = btv.getIcon();
                 // Clone when needed
-                btvDrawableSupplier = () -> btvIcon.getConstantState().newDrawable();
+                btvDrawableSupplier = () -> (btvIcon != null && btvIcon.getConstantState() != null)
+                        ? btvIcon.getConstantState().newDrawable()
+                        : null;
             }
         } else {
             btvIcon = null;
@@ -742,6 +749,7 @@ public class FloatingIconView extends FrameLayout implements
         mIsOpening = false;
         mPositionOut = null;
         mListenerView.setListener(null);
+        mListenerView.setCloseOnTouchDown(true);
         mOriginalIcon = null;
         mOnTargetChangeRunnable = null;
         mBadge = null;
