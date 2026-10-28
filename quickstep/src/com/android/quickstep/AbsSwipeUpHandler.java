@@ -1179,7 +1179,8 @@ public abstract class AbsSwipeUpHandler<
     }
 
     private boolean finishHomeFlightEarly(@NonNull Runnable launch) {
-        if (!isParallelHomeFlightEnabled() || mRecentsAnimationController == null || mGestureState.getEndTarget() != HOME
+        if (!isParallelHomeFlightEnabled() || mRecentsAnimationController == null
+                || mGestureState.getEndTarget() != HOME
                 || mStateCallback.hasStates(STATE_CURRENT_TASK_FINISHED)
                 || mStateCallback.hasStates(STATE_HANDLER_INVALIDATED)) {
             return false;
@@ -1203,8 +1204,14 @@ public abstract class AbsSwipeUpHandler<
                 || mRecentsAnimationController == null || mHomeWindowAnimations.size() != 1) {
             return;
         }
-        ThumbnailData snapshot = mRecentsAnimationController.screenshotTask(
-                mGestureState.getTopRunningTaskId());
+        int taskId = mGestureState.getTopRunningTaskId();
+        ThumbnailData snapshot = mTaskSnapshotCache.get(taskId);
+        if (snapshot == null) {
+            snapshot = mRecentsAnimationController.screenshotTask(taskId);
+            if (snapshot != null) {
+                mTaskSnapshotCache.put(taskId, snapshot);
+            }
+        }
         android.graphics.Bitmap bitmap = snapshot == null ? null : snapshot.getThumbnail();
         int rotation = mRemoteTargetHandles[0].getTaskViewSimulator().getOrientationState()
                 .getDisplayRotation();
@@ -1245,6 +1252,148 @@ public abstract class AbsSwipeUpHandler<
         for (RemoteTargetHandle handle : mRemoteTargetHandles) {
             if (handle != null) {
                 handle.getTransformParams().setTargetSet(null);
+            }
+        }
+    }
+
+    private boolean canCatchWindow(MotionEvent ev) {
+        RectFSpringAnim anim = mCatchableWindowAnim;
+        return anim != null
+                && anim.isRunning()
+                && mRecentsAnimationController != null
+                && mGestureState.getEndTarget() == HOME
+                && getOrientationHandler() == RecentsPagedOrientationHandler.PORTRAIT
+                && anim.getCurrentRect().contains(ev.getX(), ev.getY());
+    }
+
+    private class WindowCatchInputConsumer implements InputConsumer {
+        private final InputConsumer mLauncherConsumer;
+        private VelocityTracker mVelocityTracker;
+        private boolean mCatching;
+        private float mLastX;
+        private float mLastY;
+        private MotionEvent mPendingDown;
+        private RectFSpringAnim mPendingWindowAnim;
+
+        WindowCatchInputConsumer(InputConsumer launcherConsumer) {
+            mLauncherConsumer = launcherConsumer;
+        }
+
+        @Override public int getType() { return mLauncherConsumer.getType(); }
+        @Override public int getDisplayId() { return mLauncherConsumer.getDisplayId(); }
+        @Override public void onHoverEvent(MotionEvent ev) { mLauncherConsumer.onHoverEvent(ev); }
+        @Override public void onKeyEvent(KeyEvent ev) { mLauncherConsumer.onKeyEvent(ev); }
+
+        @Override
+        public void onMotionEvent(MotionEvent ev) {
+            if (isParallelHomeFlightEnabled()) {
+                onParallelHomeMotionEvent(ev);
+                return;
+            }
+            if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                mCatching = canCatchWindow(ev);
+                if (mCatching) {
+                    mCatchableWindowAnim.pause();
+                    mVelocityTracker = VelocityTracker.obtain();
+                } else if (mOnTouchDownCallback != null) {
+                    mOnTouchDownCallback.run();
+                    mOnTouchDownCallback = null;
+                }
+            }
+            if (!mCatching) {
+                mLauncherConsumer.onMotionEvent(ev);
+                return;
+            }
+            mVelocityTracker.addMovement(ev);
+            switch (ev.getActionMasked()) {
+                case MotionEvent.ACTION_MOVE:
+                    mCatchableWindowAnim.dragBy(ev.getX() - mLastX, ev.getY() - mLastY);
+                    break;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    mVelocityTracker.computeCurrentVelocity(1);
+                    PointF velocityPxPerMs = ev.getActionMasked() == MotionEvent.ACTION_UP
+                            ? new PointF(mVelocityTracker.getXVelocity(),
+                                    mVelocityTracker.getYVelocity())
+                            : new PointF();
+                    mVelocityTracker.recycle();
+                    mVelocityTracker = null;
+                    mCatching = false;
+                    mCatchableWindowAnim.resume(mContext, velocityPxPerMs);
+                    break;
+            }
+            mLastX = ev.getX();
+            mLastY = ev.getY();
+        }
+
+        private void onParallelHomeMotionEvent(MotionEvent ev) {
+            final int action = ev.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN && canCatchWindow(ev)) {
+                mPendingDown = MotionEvent.obtain(ev);
+                mPendingWindowAnim = mCatchableWindowAnim;
+                mVelocityTracker = VelocityTracker.obtain();
+                mVelocityTracker.addMovement(ev);
+                mLastX = ev.getX();
+                mLastY = ev.getY();
+                return;
+            }
+            if (mPendingDown == null) {
+                if (action == MotionEvent.ACTION_DOWN) dispatchLauncherTouchDown();
+                mLauncherConsumer.onMotionEvent(ev);
+                return;
+            }
+            mVelocityTracker.addMovement(ev);
+            if (!mCatching && action == MotionEvent.ACTION_MOVE) {
+                float dx = ev.getX() - mPendingDown.getX();
+                float dy = ev.getY() - mPendingDown.getY();
+                int slop = android.view.ViewConfiguration.get(mContext).getScaledTouchSlop();
+                if (dx * dx + dy * dy > slop * slop) {
+                    if (mPendingWindowAnim.isRunning()) {
+                        mCatching = true;
+                        mPendingWindowAnim.pause();
+                    } else {
+                        dispatchLauncherTouchDown();
+                        mLauncherConsumer.onMotionEvent(mPendingDown);
+                        mPendingDown.recycle();
+                        mPendingDown = null;
+                        mPendingWindowAnim = null;
+                        mVelocityTracker.recycle();
+                        mVelocityTracker = null;
+                        mLauncherConsumer.onMotionEvent(ev);
+                        return;
+                    }
+                }
+            }
+            if (mCatching && action == MotionEvent.ACTION_MOVE) {
+                mPendingWindowAnim.dragBy(ev.getX() - mLastX, ev.getY() - mLastY);
+            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                if (mCatching) {
+                    mVelocityTracker.computeCurrentVelocity(1);
+                    PointF velocity = action == MotionEvent.ACTION_UP
+                            ? new PointF(mVelocityTracker.getXVelocity(),
+                                    mVelocityTracker.getYVelocity()) : new PointF();
+                    mPendingWindowAnim.resume(mContext, velocity);
+                } else if (action == MotionEvent.ACTION_UP) {
+                    dispatchLauncherTouchDown();
+                    mLauncherConsumer.onMotionEvent(mPendingDown);
+                    mLauncherConsumer.onMotionEvent(ev);
+                }
+                mPendingDown.recycle();
+                mPendingDown = null;
+                mPendingWindowAnim = null;
+                mVelocityTracker.recycle();
+                mVelocityTracker = null;
+                mCatching = false;
+            }
+            mLastX = ev.getX();
+            mLastY = ev.getY();
+        }
+
+        private void dispatchLauncherTouchDown() {
+            if (mOnTouchDownCallback != null) {
+                mOnTouchDownCallback.run();
+                mOnTouchDownCallback = null;
             }
         }
     }
@@ -1382,177 +1531,6 @@ public abstract class AbsSwipeUpHandler<
             mRecentsView.runOnPageScrollsInitialized(handleNormalGestureEndCallback);
         } else {
             handleNormalGestureEndCallback.run();
-        }
-    }
-
-    private boolean canCatchWindow(MotionEvent ev) {
-        RectFSpringAnim anim = mCatchableWindowAnim;
-        return anim != null
-                && anim.isRunning()
-                && mRecentsAnimationController != null
-                && mGestureState.getEndTarget() == HOME
-                && getOrientationHandler() == RecentsPagedOrientationHandler.PORTRAIT
-                && anim.getCurrentRect().contains(ev.getX(), ev.getY());
-    }
-
-    /**
-     * Lets a touch on the window catch it while it springs home and throw it on with the finger's
-     * velocity. In COS mode, a tap goes to Launcher and only a drag catches the window.
-     */
-    private class WindowCatchInputConsumer implements InputConsumer {
-
-        private final InputConsumer mLauncherConsumer;
-        private VelocityTracker mVelocityTracker;
-        private boolean mCatching;
-        private float mLastX;
-        private float mLastY;
-        private MotionEvent mPendingDown;
-        private RectFSpringAnim mPendingWindowAnim;
-
-        WindowCatchInputConsumer(InputConsumer launcherConsumer) {
-            mLauncherConsumer = launcherConsumer;
-        }
-
-        @Override
-        public int getType() {
-            return mLauncherConsumer.getType();
-        }
-
-        @Override
-        public int getDisplayId() {
-            return mLauncherConsumer.getDisplayId();
-        }
-
-        @Override
-        public void onHoverEvent(MotionEvent ev) {
-            mLauncherConsumer.onHoverEvent(ev);
-        }
-
-        @Override
-        public void onKeyEvent(KeyEvent ev) {
-            mLauncherConsumer.onKeyEvent(ev);
-        }
-
-        @Override
-        public void onMotionEvent(MotionEvent ev) {
-            if (isParallelHomeFlightEnabled()) {
-                onParallelHomeMotionEvent(ev);
-                return;
-            }
-            if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                mCatching = canCatchWindow(ev);
-                if (mCatching) {
-                    mCatchableWindowAnim.pause();
-                    mVelocityTracker = VelocityTracker.obtain();
-                } else if (mOnTouchDownCallback != null) {
-                    mOnTouchDownCallback.run();
-                    mOnTouchDownCallback = null;
-                }
-            }
-            if (!mCatching) {
-                mLauncherConsumer.onMotionEvent(ev);
-                return;
-            }
-
-            mVelocityTracker.addMovement(ev);
-            switch (ev.getActionMasked()) {
-                case MotionEvent.ACTION_MOVE:
-                    mCatchableWindowAnim.dragBy(ev.getX() - mLastX, ev.getY() - mLastY);
-                    break;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    mVelocityTracker.computeCurrentVelocity(1);
-                    PointF velocityPxPerMs = ev.getActionMasked() == MotionEvent.ACTION_UP
-                            ? new PointF(mVelocityTracker.getXVelocity(),
-                                    mVelocityTracker.getYVelocity())
-                            : new PointF();
-                    mVelocityTracker.recycle();
-                    mVelocityTracker = null;
-                    mCatching = false;
-                    mCatchableWindowAnim.resume(mContext, velocityPxPerMs);
-                    break;
-            }
-            mLastX = ev.getX();
-            mLastY = ev.getY();
-        }
-
-        private void onParallelHomeMotionEvent(MotionEvent ev) {
-            final int action = ev.getActionMasked();
-            if (action == MotionEvent.ACTION_DOWN && canCatchWindow(ev)) {
-                // Keep flying until this becomes a drag. A tap must be able to relaunch the
-                // landing app, or another icon underneath the closing window.
-                mPendingDown = MotionEvent.obtain(ev);
-                mPendingWindowAnim = mCatchableWindowAnim;
-                mVelocityTracker = VelocityTracker.obtain();
-                mVelocityTracker.addMovement(ev);
-                mLastX = ev.getX();
-                mLastY = ev.getY();
-                return;
-            }
-            if (mPendingDown == null) {
-                if (action == MotionEvent.ACTION_DOWN) {
-                    dispatchLauncherTouchDown();
-                }
-                mLauncherConsumer.onMotionEvent(ev);
-                return;
-            }
-
-            mVelocityTracker.addMovement(ev);
-            if (!mCatching && action == MotionEvent.ACTION_MOVE) {
-                float dx = ev.getX() - mPendingDown.getX();
-                float dy = ev.getY() - mPendingDown.getY();
-                int slop = android.view.ViewConfiguration.get(mContext).getScaledTouchSlop();
-                if (dx * dx + dy * dy > slop * slop) {
-                    if (mPendingWindowAnim.isRunning()) {
-                        mCatching = true;
-                        mPendingWindowAnim.pause();
-                    } else {
-                        // The flight settled before this became a drag. Give Launcher the
-                        // original down and the remaining gesture rather than turning it into
-                        // an icon tap when the finger eventually lifts.
-                        dispatchLauncherTouchDown();
-                        mLauncherConsumer.onMotionEvent(mPendingDown);
-                        mPendingDown.recycle();
-                        mPendingDown = null;
-                        mPendingWindowAnim = null;
-                        mVelocityTracker.recycle();
-                        mVelocityTracker = null;
-                        mLauncherConsumer.onMotionEvent(ev);
-                        return;
-                    }
-                }
-            }
-            if (mCatching && action == MotionEvent.ACTION_MOVE) {
-                mPendingWindowAnim.dragBy(ev.getX() - mLastX, ev.getY() - mLastY);
-            }
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                if (mCatching) {
-                    mVelocityTracker.computeCurrentVelocity(1);
-                    PointF velocity = action == MotionEvent.ACTION_UP
-                            ? new PointF(mVelocityTracker.getXVelocity(),
-                                    mVelocityTracker.getYVelocity()) : new PointF();
-                    mPendingWindowAnim.resume(mContext, velocity);
-                } else if (action == MotionEvent.ACTION_UP) {
-                    dispatchLauncherTouchDown();
-                    mLauncherConsumer.onMotionEvent(mPendingDown);
-                    mLauncherConsumer.onMotionEvent(ev);
-                }
-                mPendingDown.recycle();
-                mPendingDown = null;
-                mPendingWindowAnim = null;
-                mVelocityTracker.recycle();
-                mVelocityTracker = null;
-                mCatching = false;
-            }
-            mLastX = ev.getX();
-            mLastY = ev.getY();
-        }
-
-        private void dispatchLauncherTouchDown() {
-            if (mOnTouchDownCallback != null) {
-                mOnTouchDownCallback.run();
-                mOnTouchDownCallback = null;
-            }
         }
     }
 
@@ -2160,8 +2138,6 @@ public abstract class AbsSwipeUpHandler<
 
         if (mGestureState.getEndTarget() == HOME) {
             if (isParallelHomeFlightEnabled() && mRecentsAnimationController != null) {
-                // Settled on home: an app launched before the flight ends must not be merged
-                // into this transition as a task switch.
                 mRecentsAnimationController.setWillFinishToHome(true);
             }
             getOrientationHandler().adjustFloatingIconStartVelocity(velocityPxPerMs);
@@ -3397,8 +3373,6 @@ public abstract class AbsSwipeUpHandler<
     /**
      * Applies the transform on the recents animation
      */
-    private static final float TASK_CHANGER_WINDOW_FADE = 0.3f;
-
     protected void applyScrollAndTransform() {
         // No need to apply any transform if there is ongoing swipe-to-home animator
         //    swipe-to-pip handles the leash solely
@@ -3430,10 +3404,6 @@ public abstract class AbsSwipeUpHandler<
                         transformParams, taskViewSimulator, progress)) {
                     continue;
                 }
-                boolean taskChanger = mRecentsView != null && mRecentsView.isContentForcedHidden();
-                transformParams.setTargetAlpha(taskChanger
-                        ? 1f - Utilities.boundToRange(progress / TASK_CHANGER_WINDOW_FADE, 0f, 1f)
-                        : 1f);
                 taskViewSimulator.apply(transformParams);
             }
         }
