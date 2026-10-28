@@ -27,6 +27,7 @@ import com.android.launcher3.dagger.LauncherAppComponent
 import com.android.launcher3.dagger.PerDisplaySingleton
 import com.android.launcher3.display.DisplayController
 import com.android.launcher3.display.LauncherDisplayInfo
+import com.android.launcher3.taskbar.PenguinTaskbarSettings
 import com.android.launcher3.statehandlers.DesktopVisibilityController
 import com.android.launcher3.util.DaggerSingletonObject
 import com.android.launcher3.util.NavigationMode.NO_BUTTON
@@ -56,14 +57,20 @@ constructor(
     val isRecentsEnabled: Boolean
         get() = enableRecentsInTaskbar()
 
+    private val showsDesktopDock: Boolean
+        get() =
+            isPrimaryDisplay &&
+                displayInfo?.navigationMode == NO_BUTTON &&
+                PenguinTaskbarSettings.showsDesktopDock(context, launcherPrefs)
+
     @get:AnyThread
     val isTransient: Boolean
         get() =
-            if (
-                displayInfo?.navigationMode != NO_BUTTON ||
-                    desktopVisibilityController.isInDesktopMode(displayId) ||
-                    displayInfo?.showDesktopTaskbarForFreeformDisplay == true
-            ) {
+            if (displayInfo?.navigationMode != NO_BUTTON) {
+                false
+            } else if (desktopVisibilityController.isInDesktopMode(displayId)) {
+                showsDesktopDock
+            } else if (displayInfo?.showDesktopTaskbarForFreeformDisplay == true) {
                 false
             } else {
                 !isPinned
@@ -71,11 +78,10 @@ constructor(
 
     val isPinned: Boolean
         get() =
-            if (
-                desktopVisibilityController.isInDesktopMode(displayId) ||
-                    displayInfo?.showDesktopTaskbarForFreeformDisplay == true
-            ) {
+            if (displayInfo?.showDesktopTaskbarForFreeformDisplay == true) {
                 true
+            } else if (desktopVisibilityController.isInDesktopMode(displayId)) {
+                !showsDesktopDock
             } else {
                 launcherPrefs.get(TASKBAR_PINNING)
             }

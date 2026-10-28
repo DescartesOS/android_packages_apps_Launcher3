@@ -334,6 +334,7 @@
     <string name="always_show_taskbar">Always show Taskbar</string>
     <!-- Text in popup dialog for user to switch between system navigation modes. [CHAR LIMIT=30] -->
     <string name="change_navigation_mode">Change navigation mode</string>
+    <string name="taskbar_settings">Taskbar settings</string>
     <!-- Accessibility title for the Taskbar vertical divider icon. [CHAR_LIMIT=NONE] -->
     <string name="taskbar_divider_a11y_title">Taskbar Divider</string>
     <!-- Accessibility title for the Taskbar Overflow icon. [CHAR_LIMIT=NONE] -->

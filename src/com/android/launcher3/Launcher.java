@@ -2556,6 +2556,16 @@ public class Launcher extends StatefulActivity<LauncherState>
         }
     }
 
+    private boolean mHomeRevealAnimationRunning;
+
+    public boolean isHomeRevealAnimationRunning() {
+        return mHomeRevealAnimationRunning;
+    }
+
+    public void setHomeRevealAnimationRunning(boolean running) {
+        mHomeRevealAnimationRunning = running;
+    }
+
     /** @return list of View targets to be blurred based on changes to depth. */
     @NonNull
     public List<View> getDepthBlurTargets() {

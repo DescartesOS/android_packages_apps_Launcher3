@@ -974,6 +974,10 @@ public class TaskbarViewController implements TaskbarControllers.LoggableTaskbar
     private void animateIconsForReveal(ViewGroup parent, AnimatorSet reveal, AnimatorSet as,
             boolean isStashed, int totalNumIcons, long duration, Rect stashedBounds,
             boolean dispatchOnAnimationStart) {
+        if (mActivity.isDesktopDock()) {
+            animateDockIconsForReveal(parent, reveal, as, isStashed, duration);
+            return;
+        }
         float newChildWidth = stashedBounds.width() / (float) totalNumIcons;
         // All children move the same y-amount since they will be cropped to the same centerY.
         float croppedTransY = mTaskbarView.getIconTouchSize() - stashedBounds.height();
@@ -1036,6 +1040,32 @@ public class TaskbarViewController implements TaskbarControllers.LoggableTaskbar
                     child.setTranslationX(0);
                     child.setTranslationY(0);
                 }));
+            }
+        }
+    }
+
+    private void animateDockIconsForReveal(ViewGroup parent, AnimatorSet reveal, AnimatorSet as,
+            boolean isStashed, long duration) {
+        float hiddenY = mActivity.getTransientTaskbarProfile().getHeight()
+                + mActivity.getResources().getDimensionPixelSize(
+                        R.dimen.transient_taskbar_bottom_margin);
+        for (int i = parent.getChildCount() - 1; i >= 0; i--) {
+            View child = parent.getChildAt(i);
+            if (child instanceof TaskbarPinnedAppIconContainer tic) {
+                animateDockIconsForReveal(tic, reveal, as, isStashed, duration);
+                continue;
+            }
+            float[] transY = isStashed ? new float[] {hiddenY} : new float[] {hiddenY, 0};
+            if (child instanceof Reorderable) {
+                MultiTranslateDelegate mtd = ((Reorderable) child).getTranslateDelegate();
+                reveal.play(ObjectAnimator.ofFloat(mtd.getTranslationY(INDEX_TASKBAR_REVEAL_ANIM),
+                        MULTI_PROPERTY_VALUE, transY).setDuration(duration));
+                as.addListener(forEndCallback(() ->
+                        mtd.setTranslation(INDEX_TASKBAR_REVEAL_ANIM, 0, 0)));
+            } else {
+                reveal.play(ObjectAnimator.ofFloat(child, VIEW_TRANSLATE_Y, transY)
+                        .setDuration(duration));
+                as.addListener(forEndCallback(() -> child.setTranslationY(0)));
             }
         }
     }

@@ -35,6 +35,8 @@ import com.android.launcher3.appprediction.PredictionRowView;
 import com.android.launcher3.dragndrop.DragOptions.PreDragCondition;
 import com.android.launcher3.model.data.AppInfo;
 import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.taskbar.TaskbarActivityContext;
+import com.penguin.dex.launcher.DexFeatures;
 import com.android.launcher3.taskbar.TaskbarControllers;
 import com.android.launcher3.taskbar.TaskbarUiState;
 import com.android.launcher3.taskbar.overlay.TaskbarOverlayContext;
@@ -64,6 +66,7 @@ public final class TaskbarAllAppsController {
     private @Nullable TaskbarAllAppsSlideInView mSlideInView;
     private @Nullable TaskbarAllAppsContainerView mAppsView;
     private @Nullable TaskbarSearchSessionController mSearchSessionController;
+    private @Nullable DexLaunchpadView mDexLaunchpad;
 
     // Application data models.
     private @NonNull AppInfo[] mApps = EMPTY_ARRAY;
@@ -150,6 +153,17 @@ public final class TaskbarAllAppsController {
     }
 
     private void toggle(boolean showKeyboard) {
+        // A DeX desktop opens PenguinDex's Launchpad instead.
+        TaskbarActivityContext taskbar = mControllers.taskbarActivityContext;
+        if (taskbar.isDexDesktop() && DexFeatures.launchpad(taskbar)) {
+            if (mDexLaunchpad != null && mDexLaunchpad.isOpen()) {
+                mDexLaunchpad.close(true);
+            } else {
+                mDexLaunchpad = DexLaunchpadView.show(
+                        mControllers.taskbarOverlayController.requestWindow(), mApps);
+            }
+            return;
+        }
         if (isOpen()) {
             mSlideInView.close(true);
         } else {

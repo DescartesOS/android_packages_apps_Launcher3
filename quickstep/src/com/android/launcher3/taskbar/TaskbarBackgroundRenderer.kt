@@ -22,6 +22,9 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Rect
+import android.view.WindowManager
+import com.android.internal.graphics.drawable.BackgroundBlurDrawable
 import com.android.app.animation.Interpolators
 import com.android.launcher3.Flags
 import com.android.launcher3.R
@@ -34,6 +37,8 @@ import com.android.launcher3.taskbar.TaskbarPinningController.Companion.PINNING_
 import com.android.launcher3.taskbar.TaskbarPinningController.Companion.PINNING_TRANSIENT
 import com.android.launcher3.taskbar.Utilities.getShapedTaskbarRadius
 import com.android.launcher3.util.SettingsCache
+import com.android.launcher3.util.PenguinDockGlass
+import com.penguin.dex.launcher.DexDock
 import kotlin.math.min
 
 /** Helps draw the taskbar background, made up of a rectangle plus two inverted rounded corners. */
@@ -80,12 +85,20 @@ class TaskbarBackgroundRenderer(private val context: TaskbarActivityContext) {
     private var stashedHandleWidth =
         context.resources.getDimensionPixelSize(R.dimen.taskbar_stashed_handle_width)
 
-    private val stashedHandleHeight =
+    private val navBarHintHeight =
         if (SettingsCache.INSTANCE.get(context).getValue(NAVIGATION_BAR_HINT_URI)) {
             context.resources.getDimensionPixelSize(R.dimen.taskbar_stashed_handle_height)
         } else {
             0
         }
+
+    // The desktop dock has no handle: it grows from, and shrinks into, the bottom edge.
+    private val stashedHandleHeight: Int
+        get() = if (context.isDesktopDock) 0 else navBarHintHeight
+
+    private val isDockGlass by lazy { PenguinTaskbarSettings.isDockGlassEnabled(context) }
+    private val sharedDockGlass by lazy { PenguinDockGlass(context.dragLayer) }
+    private val dockBlurBounds = Rect()
 
     init {
         paint.color = context.getColor(R.color.taskbar_background)
@@ -162,6 +175,19 @@ class TaskbarBackgroundRenderer(private val context: TaskbarActivityContext) {
     }
 
     private fun drawPersistentBackground(canvas: Canvas) {
+        if (context.isDexDock && !transientBackgroundBounds.isEmpty) {
+            DexDock.draw(
+                canvas,
+                context.dragLayer,
+                transientBackgroundBounds.left.toFloat(),
+                transientBackgroundBounds.right.toFloat(),
+                min(maxPersistentTaskbarHeight, backgroundHeight),
+                paint.color,
+                paint.alpha,
+                context.resources.displayMetrics.density,
+            )
+            return
+        }
         if (isAnimatingPinning || isAnimatingPersistentTaskbar) {
             val persistentTaskbarHeight = maxPersistentTaskbarHeight * backgroundProgress
             canvas.translate(0f, canvas.height - persistentTaskbarHeight)
@@ -188,6 +214,10 @@ class TaskbarBackgroundRenderer(private val context: TaskbarActivityContext) {
         val isAnimating = isAnimatingPinning || isAnimatingTransientTaskbar
         val heightProgressWhileAnimating =
             if (isAnimating) transientTaskbarHeight else backgroundHeight
+        if (context.isDesktopDock && !isAnimatingPinning) {
+            drawDesktopDock(canvas, heightProgressWhileAnimating / maxTransientTaskbarHeight)
+            return
+        }
 
         var progress = heightProgressWhileAnimating / maxTransientTaskbarHeight
         progress = Math.round(progress * 100f) / 100f
@@ -266,6 +296,48 @@ class TaskbarBackgroundRenderer(private val context: TaskbarActivityContext) {
         val horizontalInset = fullWidth * widthInsetPercentage
         lastDrawnTransientRect.inset(horizontalInset, 0f)
 
+        canvas.drawRoundRect(lastDrawnTransientRect, radius, radius, paint)
+        canvas.drawRoundRect(lastDrawnTransientRect, radius, radius, strokePaint)
+    }
+
+    private fun drawDesktopDock(canvas: Canvas, progressRaw: Float) {
+        val progress = Math.round(progressRaw * 100f) / 100f
+        val res = context.resources
+        bottomMargin = res.getDimensionPixelSize(R.dimen.transient_taskbar_bottom_margin)
+        shadowBlur = res.getDimension(R.dimen.transient_taskbar_shadow_blur)
+        keyShadowDistance = res.getDimension(R.dimen.transient_taskbar_key_shadow_distance)
+        val height = maxTransientTaskbarHeight
+        val bottom =
+            canvas.height - bottomMargin +
+                (1f - progress) * (height + bottomMargin) +
+                translationYForSwipe +
+                translationYForStash
+        val fullWidth = transientBackgroundBounds.width()
+        lastDrawnTransientRect.set(
+            transientBackgroundBounds.left + translationXForBubbleBar,
+            bottom - height,
+            transientBackgroundBounds.right + translationXForBubbleBar,
+            bottom,
+        )
+        lastDrawnTransientRect.inset(fullWidth * widthInsetPercentage, 0f)
+        val radius =
+            min(context.resources.getDimension(R.dimen.ipad_dock_radius), height * 0.4f)
+        strokePaint.alpha = (paint.alpha * STROKE_ALPHA) / 255
+        if (isDockGlass) {
+            lastDrawnTransientRect.roundOut(dockBlurBounds)
+            sharedDockGlass.bounds = dockBlurBounds
+            sharedDockGlass.alpha = paint.alpha
+            sharedDockGlass.draw(canvas)
+            return
+        }
+        val newShadowAlpha =
+            mapToRange(paint.alpha.toFloat(), 0f, 255f, 0f, shadowAlpha, Interpolators.LINEAR)
+        paint.setShadowLayer(
+            shadowBlur,
+            0f,
+            keyShadowDistance,
+            setColorAlphaBound(Color.BLACK, Math.round(newShadowAlpha)),
+        )
         canvas.drawRoundRect(lastDrawnTransientRect, radius, radius, paint)
         canvas.drawRoundRect(lastDrawnTransientRect, radius, radius, strokePaint)
     }

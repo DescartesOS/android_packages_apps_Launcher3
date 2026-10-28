@@ -32,4 +32,5 @@
     <!-- Accessibility action to move app icon in the taskbar -->
     <item type="id" name="action_move_item_left" />
     <item type="id" name="action_move_item_right" />
+    <item type="id" name="taskbar_dock_bounce" />
 </resources>

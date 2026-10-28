@@ -215,6 +215,7 @@ import com.android.wm.shell.shared.bubbles.BubbleFeatureConfigImpl;
 import com.android.wm.shell.shared.desktopmode.DesktopModeTransitionSource;
 import com.android.wm.shell.shared.desktopmode.DesktopState;
 import com.android.wm.shell.shared.desktopmode.DesktopTaskToFrontReason;
+import com.penguin.dex.launcher.DexFeatures;
 
 import lineageos.providers.LineageSettings;
 
@@ -1024,7 +1025,24 @@ public class TaskbarActivityContext extends BaseTaskbarContext {
 
     /** Returns whether taskbar should start align. */
     public boolean shouldStartAlignTaskbar() {
+        // A DeX desktop centres its dock, as a Mac's does.
+        if (isDexDock()) return false;
         return isThreeButtonNav() && mDeviceProfile.getTaskbarProfile().isStartAlignTaskbar();
+    }
+
+    /** Whether this taskbar is a desktop's dock (Settings > System > Taskbar). */
+    public boolean isDesktopDock() {
+        return mIsTransient && isPrimaryDisplay() && isInDesktopMode();
+    }
+
+    /** Whether this taskbar is a DeX desktop's. */
+    public boolean isDexDesktop() {
+        return mDeviceProfile.getDeviceProperties().getDeviceConfiguration().isExternalDisplay();
+    }
+
+    /** Whether this taskbar is a DeX desktop's, drawn as a floating dock. */
+    public boolean isDexDock() {
+        return isDexDesktop() && DexFeatures.dock(this);
     }
 
     public boolean isGestureNav() {

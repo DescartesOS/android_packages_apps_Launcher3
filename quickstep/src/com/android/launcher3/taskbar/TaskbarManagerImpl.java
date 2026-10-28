@@ -40,6 +40,7 @@ import static java.util.Objects.requireNonNull;
 import android.animation.AnimatorSet;
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.database.ContentObserver;
 import android.content.IIntentReceiver;
 import android.content.IIntentSender;
 import android.content.Intent;
@@ -362,6 +363,8 @@ public class TaskbarManagerImpl {
 
         LauncherPrefChangeListener prefChangeListener = key -> {
             if (TASKBAR_PINNING_KEY.equals(key)) {
+                PenguinTaskbarSettings.syncPinningToAutoHide(mBaseContext,
+                        launcherPrefs.get(TASKBAR_PINNING));
                 getTaskbarUiThread().execute(this::recreateTaskbars);
             }
         };
@@ -428,6 +431,33 @@ public class TaskbarManagerImpl {
                         getTaskbarUiThread(),
                         v -> onTaskbarChanged(v, TaskbarActivityContext::imeDrawsImeNavBarEnabled));
         cleanupTasks.addCloseable(getTaskbarUiThread(), navbarImeSpaceSafeCloseable);
+
+        ContentObserver dockSettingsObserver = new ContentObserver(
+                new Handler(getTaskbarUiThread().getLooper())) {
+            @Override
+            public void onChange(boolean selfChange) {
+                recreateTaskbars();
+            }
+        };
+        for (Uri uri : PenguinTaskbarSettings.DOCK_URIS) {
+            mBaseContext.getContentResolver().registerContentObserver(
+                    uri, false, dockSettingsObserver);
+        }
+        cleanupTasks.addTask(getTaskbarUiThread(), () -> mBaseContext.getContentResolver()
+                .unregisterContentObserver(dockSettingsObserver));
+
+        ContentObserver autoHideObserver = new ContentObserver(
+                new Handler(getTaskbarUiThread().getLooper())) {
+            @Override
+            public void onChange(boolean selfChange) {
+                PenguinTaskbarSettings.syncAutoHideToPrefs(mBaseContext, launcherPrefs);
+            }
+        };
+        mBaseContext.getContentResolver().registerContentObserver(
+                PenguinTaskbarSettings.AUTOHIDE_URI, false, autoHideObserver);
+        cleanupTasks.addTask(getTaskbarUiThread(), () -> mBaseContext.getContentResolver()
+                .unregisterContentObserver(autoHideObserver));
+        PenguinTaskbarSettings.syncAutoHideToPrefs(mBaseContext, launcherPrefs);
 
         SimpleBroadcastReceiver shutdownReceiver = new SimpleBroadcastReceiver(
                 mBaseContext,

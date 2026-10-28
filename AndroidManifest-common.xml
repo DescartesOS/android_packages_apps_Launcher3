@@ -32,6 +32,8 @@
     -->
 
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- Lets the launcher open SystemUI's lockscreen CustomizationProvider for the fluid clock. -->
+    <uses-permission android:name="android.permission.CUSTOMIZE_SYSTEM_UI" />
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
     <uses-permission android:name="android.permission.SET_WALLPAPER_HINTS" />
     <uses-permission android:name="android.permission.BIND_APPWIDGET" />

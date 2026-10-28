@@ -18,6 +18,7 @@ package com.android.launcher3.taskbar;
 import static android.view.accessibility.AccessibilityManager.FLAG_CONTENT_CONTROLS;
 
 import static com.android.app.animation.Interpolators.EMPHASIZED;
+import static com.android.app.animation.Interpolators.ACCELERATE_DECELERATE;
 import static com.android.app.animation.Interpolators.FINAL_FRAME;
 import static com.android.app.animation.Interpolators.INSTANT;
 import static com.android.app.animation.Interpolators.LINEAR;
@@ -160,7 +161,8 @@ public class TaskbarStashController implements TaskbarControllers.LoggableTaskba
      * Use {@link #getStashDuration()} to query duration.
      */
     @VisibleForTesting
-    static final long TRANSIENT_TASKBAR_STASH_DURATION = 417;
+    static final long TRANSIENT_TASKBAR_STASH_DURATION = 250;
+    private static final long DESKTOP_DOCK_HIDE_DURATION = 350;
 
     /**
      * How long to stash/unstash when keyboard is appearing/disappearing.
@@ -183,7 +185,7 @@ public class TaskbarStashController implements TaskbarControllers.LoggableTaskba
     /**
      * How long to delay the icon/stash handle alpha.
      */
-    public static final int TASKBAR_STASH_DURATION_WITHOUT_ICON_ALIGNMENT = 400;
+    public static final int TASKBAR_STASH_DURATION_WITHOUT_ICON_ALIGNMENT = 250;
 
     /**
      * How long take to icon alpha to change during stash animation.
@@ -591,6 +593,11 @@ public class TaskbarStashController implements TaskbarControllers.LoggableTaskba
                 );
     }
 
+
+    /** Whether the taskbar auto-hides over apps in desktop mode, whether it is shown right now. */
+    private boolean isAutoHidingInDesktopMode() {
+        return isInApp() && mActivity.isInDesktopMode() && shouldAllowTaskbarToAutoStash();
+    }
     /**
      * Returns the height that taskbar will inset when inside apps.
      *
@@ -598,6 +605,9 @@ public class TaskbarStashController implements TaskbarControllers.LoggableTaskba
      * @see android.view.WindowInsets.Type#systemBars()
      */
     public int getContentHeightToReportToApps() {
+        if (isAutoHidingInDesktopMode()) {
+            return 0;
+        }
         boolean isTransient = mActivity.isTransientTaskbar();
         if (mActivity.isUserSetupComplete() && (mActivity.isPhoneGestureNavMode() || isTransient)) {
             return getStashedHeight();
@@ -1111,6 +1121,13 @@ public class TaskbarStashController implements TaskbarControllers.LoggableTaskba
 
     private void createTransientAnimToIsStashed(AnimatorSet as, boolean isStashed, long duration,
             boolean shouldDelayBackground, @StashAnimation int animationType) {
+        final boolean isDockHide = mActivity.isDesktopDock() && isStashed
+                && animationType != TRANSITION_HANDLE_FADE && duration > 0;
+        if (isDockHide) {
+            duration = DESKTOP_DOCK_HIDE_DURATION;
+        }
+        final android.view.animation.Interpolator slide = isDockHide
+                ? ACCELERATE_DECELERATE : EMPHASIZED;
         // Target values of the properties this is going to set
         final float backgroundOffsetTarget = isStashed ? 1 : 0;
         final float iconAlphaTarget = isStashed ? 0 : 1;
@@ -1190,10 +1207,10 @@ public class TaskbarStashController implements TaskbarControllers.LoggableTaskba
         }
 
         mControllers.taskbarViewController.addRevealAnimToIsStashed(skippable, isStashed, duration,
-                EMPHASIZED, animationType == TRANSITION_UNSTASH_SUW_MANUAL);
+                slide, animationType == TRANSITION_UNSTASH_SUW_MANUAL);
 
         play(skippable, mControllers.stashedHandleViewController
-                .createRevealAnimToIsStashed(isStashed), 0, duration, EMPHASIZED);
+                .createRevealAnimToIsStashed(isStashed), 0, duration, slide);
 
         // Return the stashed handle to its default scale in case it was changed as part of the
         // feedforward hint. Note that the reveal animation above also visually scales it.
@@ -1649,7 +1666,8 @@ public class TaskbarStashController implements TaskbarControllers.LoggableTaskba
      * returns appropriate timeout for taskbar to stash depending on accessibility being on/off.
      */
     private long getTaskbarAutoHideTimeout() {
-        return mAccessibilityManager.getRecommendedTimeoutMillis((int) NO_TOUCH_TIMEOUT_TO_STASH_MS,
+        return mAccessibilityManager.getRecommendedTimeoutMillis(
+                (int) PenguinTaskbarSettings.autoHideTimeoutMs(mActivity),
                 FLAG_CONTENT_CONTROLS);
     }
 

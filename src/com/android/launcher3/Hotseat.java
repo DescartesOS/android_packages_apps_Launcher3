@@ -138,6 +138,9 @@ public class Hotseat extends CellLayout implements Insettable {
                 VIEW_TRANSLATE_X, ICONS_TRANSLATION_X_CHANNELS_COUNT, Float::sum);
     }
 
+    /** Keeps the live glass while scaled by a RenderThread animation, which the glass follows. */
+    public void setLiveGlassWhileScaled(boolean live) {}
+
     /** Provides translation X for hotseat icons for the channel. */
     public MultiProperty getIconsTranslationX(@IconsTranslationX int channelId) {
         return mIconsTranslationXFactory.get(channelId);
